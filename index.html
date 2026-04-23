@@ -2,7 +2,10 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Habit Tracker">
 <title>Habit Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
@@ -277,18 +280,62 @@
   .palette-swatch:hover { transform: scale(1.2); }
   .palette-swatch.active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px currentColor; }
 
-  /* ── Empty state ── */
-  .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
-  .empty-state p { font-size: 15px; margin-bottom: 8px; }
-  .empty-state small { font-size: 12px; }
+  /* ── Mobile: 週ごとカード ── */
+  .week-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    margin-bottom: 12px; overflow: hidden;
+  }
+  .week-label {
+    font-size: 11px; font-weight: 500; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .5px; padding: 8px 14px 6px; border-bottom: 1px solid var(--border);
+  }
+  .week-row {
+    display: flex; align-items: center; padding: 6px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .week-row:last-child { border-bottom: none; }
+  .week-habit-name {
+    font-size: 13px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    padding-right: 8px;
+  }
+  .week-days {
+    display: flex; gap: 4px; align-items: center;
+  }
+  .week-day-col { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .week-day-label {
+    font-size: 9px; color: var(--muted); text-transform: uppercase; font-weight: 500;
+  }
+  .week-day-label.today { color: var(--text); font-weight: 700; }
+  .week-day-label.sun { color: #c0392b; }
+  .week-day-label.sat { color: #2471a3; }
+  .week-check {
+    width: 28px; height: 28px; border: 1.5px solid var(--border); border-radius: 4px;
+    cursor: pointer; transition: background .12s, border-color .12s; background: var(--surface);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .week-check.checked { border-color: var(--accent); background: var(--accent); }
+  .week-check.today-col { border-color: var(--text); border-width: 2px; }
+  .week-check.future { opacity: .3; pointer-events: none; }
 
   /* ── Responsive ── */
   @media (max-width: 600px) {
     .year-months { grid-template-columns: repeat(6, 1fr); }
-    .app { padding: 20px 16px 60px; }
-    .header h1 { font-size: 22px; }
-    .nav-title { font-size: 17px; }
+    .app { padding: 16px 12px 80px; }
+    .header { margin-bottom: 20px; padding-bottom: 14px; }
+    .header h1 { font-size: 20px; }
+    .nav-title { font-size: 16px; }
+    .nav { margin-bottom: 16px; }
+    .add-area { margin-bottom: 16px; }
+    .add-input { font-size: 16px; } /* iOSズーム防止 */
+    .user-bar span { display: none; } /* メールアドレス非表示 */
+    .month-scroll { display: none; } /* PCテーブルを非表示 */
+    .mobile-month { display: block; } /* モバイルビューを表示 */
+    .palette-swatch { width: 30px; height: 30px; } /* タップしやすく */
   }
+  @media (min-width: 601px) {
+    .mobile-month { display: none; } /* PCでは非表示 */
+  }
+
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -345,6 +392,7 @@
   </div>
 
   <div id="month-view"></div>
+  <div id="mobile-month" class="mobile-month"></div>
   <div id="year-view" style="display:none"></div>
 </div>
 </div> <!-- /app-screen -->
@@ -873,7 +921,92 @@ function renderMonth() {
   el.innerHTML = html;
 }
 
-// ── Render Year ──────────────────────────────────────
+// ── Render Mobile Month（週ごとカード）────────────────────
+function renderMobileMonth() {
+  const el = document.getElementById('mobile-month');
+  if (!el) return;
+  const y = currentYear, m = currentMonth;
+  const days = daysInMonth(y, m);
+
+  if (db.habits.length === 0) {
+    el.innerHTML = `<div class="empty-state"><p>${t().emptyMonth}</p><small>${t().emptyMonthSub}</small></div>`;
+    return;
+  }
+
+  // 月を週ごとに分割
+  const weeks = [];
+  let week = [];
+  for (let d = 1; d <= days; d++) {
+    week.push(d);
+    const dow = new Date(y, m, d).getDay();
+    if (dow === 6 || d === days) { weeks.push(week); week = []; }
+  }
+
+  let html = '';
+  weeks.forEach((weekDays, wi) => {
+    const startD = weekDays[0], endD = weekDays[weekDays.length - 1];
+    html += `<div class="week-card">
+      <div class="week-label">${startD}日 〜 ${endD}日</div>`;
+
+    db.habits.forEach((habit, hi) => {
+      const color = habitColor(habit, hi);
+      html += `<div class="week-row">
+        <span class="week-habit-name" style="color:${color}">${escHtml(habit.name)}</span>
+        <div class="week-days">`;
+
+      weekDays.forEach(d => {
+        const dow = new Date(y, m, d).getDay();
+        const key = toKey(y, m, d);
+        const checked = !!(db.logs[habit.id] && db.logs[habit.id][key]);
+        const future = isFuture(y, m, d);
+        const isT = isToday(y, m, d);
+        let labelCls = 'week-day-label';
+        if (isT) labelCls += ' today';
+        else if (dow === 0) labelCls += ' sun';
+        else if (dow === 6) labelCls += ' sat';
+        let boxCls = 'week-check';
+        if (checked) boxCls += ' checked';
+        if (future) boxCls += ' future';
+        if (isT && !checked) boxCls += ' today-col';
+        const boxStyle = checked ? `background:${color};border-color:${color}` : '';
+        html += `<div class="week-day-col">
+          <span class="${labelCls}">${t().dow[dow]}</span>
+          <div class="${boxCls}" style="${boxStyle}" data-habit="${habit.id}" data-date="${key}" data-color="${color}"></div>
+        </div>`;
+      });
+
+      html += `</div></div>`;
+    });
+
+    html += `</div>`;
+  });
+
+  el.innerHTML = html;
+
+  // タップイベント
+  el.querySelectorAll('.week-check').forEach(box => {
+    box.addEventListener('click', e => {
+      e.preventDefault();
+      const { habit, date } = box.dataset;
+      toggleMobile(habit, date, box);
+    });
+  });
+}
+
+function toggleMobile(habitId, dateKey, box) {
+  if (!db.logs[habitId]) db.logs[habitId] = {};
+  db.logs[habitId][dateKey] = !db.logs[habitId][dateKey];
+  if (!db.logs[habitId][dateKey]) delete db.logs[habitId][dateKey];
+  const checked = !!(db.logs[habitId] && db.logs[habitId][dateKey]);
+  saveToggle(habitId, dateKey, checked);
+  const hi = db.habits.findIndex(h => h.id === habitId);
+  const color = habitColor(db.habits[hi], hi);
+  box.classList.toggle('checked', checked);
+  box.style.background = checked ? color : '';
+  box.style.borderColor = checked ? color : '';
+}
+
+
 function renderYear() {
   const el = document.getElementById('year-view');
   const y = currentYear;
@@ -982,11 +1115,14 @@ function renderAll() {
   updateNavLabel();
   if (view === 'month') {
     renderMonth();
+    renderMobileMonth();
     document.getElementById('year-view').innerHTML = '';
     initDrag();
   } else {
     renderYear();
     document.getElementById('month-view').innerHTML = '';
+    const mob = document.getElementById('mobile-month');
+    if (mob) mob.innerHTML = '';
   }
 }
 
